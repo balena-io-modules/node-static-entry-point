@@ -1,0 +1,198 @@
+From 3d9945f2676ce1d6e7eaa5ab81441607a37487b8 Mon Sep 17 00:00:00 2001
+From: Juan Cruz Viotti <jviotti@openmailbox.org>
+Date: Thu, 10 Nov 2016 13:15:09 +0200
+Subject: [PATCH] main: lock entry point to "index.js" in the current directory
+
+This commit patches `src/node_main.cc` to automatically load a file
+called `index.js` present in the same directory as the node executable,
+and pass every arguments to it.
+
+Signed-off-by: Juan Cruz Viotti <jviotti@openmailbox.org>
+---
+ node.gyp                  |  1 +
+ src/node_main.cc          | 15 +++++++--
+ src/static-entry-point.cc | 77 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/static-entry-point.h  | 37 +++++++++++++++++++++++
+ 4 files changed, 128 insertions(+), 2 deletions(-)
+ create mode 100644 src/static-entry-point.cc
+ create mode 100644 src/static-entry-point.h
+
+diff --git a/node.gyp b/node.gyp
+index 0f263d1..631bc70 100644
+--- a/node.gyp
++++ b/node.gyp
+@@ -166,6 +166,7 @@
+         'src/pipe_wrap.cc',
+         'src/signal_wrap.cc',
+         'src/spawn_sync.cc',
++        'src/static-entry-point.cc',
+         'src/string_bytes.cc',
+         'src/stream_base.cc',
+         'src/stream_wrap.cc',
+diff --git a/src/node_main.cc b/src/node_main.cc
+index bde3975..cff9024 100644
+--- a/src/node_main.cc
++++ b/src/node_main.cc
+@@ -1,4 +1,5 @@
+ #include "node.h"
++#include "static-entry-point.h"
+ 
+ #ifdef _WIN32
+ #include <VersionHelpers.h>
+@@ -45,15 +46,25 @@ int wmain(int argc, wchar_t *wargv[]) {
+   }
+   argv[argc] = nullptr;
+   // Now that conversion is done, we can finally start.
+-  return node::Start(argc, argv);
++  entry::s_arguments arguments;
++  if(!entry::BuildArguments(argc, argv, &arguments)) return 1;
++  int code = node::Start(arguments.argc, arguments.argv);
++  entry::FreeArguments(&arguments);
++  return code;
+ }
+ #else
++
+ // UNIX
+ int main(int argc, char *argv[]) {
+   // Disable stdio buffering, it interacts poorly with printf()
+   // calls elsewhere in the program (e.g., any logging from V8.)
+   setvbuf(stdout, nullptr, _IONBF, 0);
+   setvbuf(stderr, nullptr, _IONBF, 0);
+-  return node::Start(argc, argv);
++
++  entry::s_arguments arguments;
++  if(!entry::BuildArguments(argc, argv, &arguments)) return 1;
++  int code = node::Start(arguments.argc, arguments.argv);
++  entry::FreeArguments(&arguments);
++  return code;
+ }
+ #endif
+diff --git a/src/static-entry-point.cc b/src/static-entry-point.cc
+new file mode 100644
+index 0000000..c77653d
+--- /dev/null
++++ b/src/static-entry-point.cc
+@@ -0,0 +1,77 @@
++#include "static-entry-point.h"
++
++namespace entry {
++
++char *AppendString(char **buffer, const char *string) {
++  if (!strcpy(*buffer, string)) return NULL;
++  char *location = *buffer;
++  *buffer += strlen(string) + 1;
++  return location;
++}
++
++size_t GetArgvByteSize(int argc, char *argv[]) {
++  size_t size = 0;
++
++  for (int index = 0; index < argc; index++) {
++    size += strlen(argv[index]) + 1;
++  }
++
++  return size;
++}
++
++char *GetStaticFilePath(char **argv) {
++  char *file = (char *)malloc(MAXPATHLEN);
++  if (file == NULL) return NULL;
++#ifdef _WIN32
++  char *directory = (char *)calloc(MAXPATHLEN, sizeof(char));
++  if (!strcat(directory, argv[0])) return NULL;
++  char *delimiter = strrchr(directory, '\\');
++  if (delimiter) delimiter[0] = 0;
++#else
++  char *directory = dirname(argv[0]);
++#endif
++  if (!strcat(file, directory)) return NULL;
++  if (!strcat(file, STATIC_FILE_NAME)) return NULL;
++  return file;
++}
++
++bool BuildArguments(int argc, char *argv[], s_arguments *arguments) {
++  char *file = GetStaticFilePath(argv);
++  if (file == NULL) return false;
++
++  int arguments_size = strlen(file) + 1 + GetArgvByteSize(argc, argv);
++  arguments->contents = (char *)malloc(arguments_size);
++  if (arguments->contents == NULL) return false;
++
++  arguments->argv = (char **)malloc(sizeof(char *) * (argc + 1));
++  if (arguments->argv == NULL) return false;
++
++  arguments->argc = argc + 1;
++
++  char *file_pointer = arguments->contents;
++
++  arguments->argv[0] = AppendString(&file_pointer, argv[0]);
++  if (arguments->argv[0] == NULL) return false;
++
++  arguments->argv[1] = AppendString(&file_pointer, file);
++  if (arguments->argv[1] == NULL) return false;
++
++  // We don't need `file` anymore
++  free(file);
++
++  if (argc > 1) {
++    for (int index = 1; index < argc; index ++) {
++      arguments->argv[index + 1] = AppendString(&file_pointer, argv[index]);
++      if (arguments->argv[index + 1] == NULL) return false;
++    }
++  }
++
++  return true;
++}
++
++void FreeArguments(s_arguments *arguments) {
++  free(arguments->argv);
++  free(arguments->contents);
++}
++
++}  // namespace entry
+diff --git a/src/static-entry-point.h b/src/static-entry-point.h
+new file mode 100644
+index 0000000..d900b30
+--- /dev/null
++++ b/src/static-entry-point.h
+@@ -0,0 +1,37 @@
++#ifndef SRC_STATIC_ENTRY_POINT_H_
++#define SRC_STATIC_ENTRY_POINT_H_
++
++#include <stdlib.h>
++#include <string.h>
++#include <stdio.h>
++
++#ifndef _WIN32
++#include <sys/param.h>
++#include <libgen.h>
++#else
++#define MAXPATHLEN 1024
++#endif
++
++namespace entry {
++
++#ifdef _WIN32
++#define STATIC_FILE_NAME "\\index.js"
++#else
++#define STATIC_FILE_NAME "/index.js"
++#endif
++
++typedef struct s_arguments {
++  int argc;
++  char **argv;
++  char *contents;
++} s_arguments;
++
++char *AppendString(char **buffer, const char *string);
++size_t GetArgvByteSize(int argc, char *argv[]);
++char *GetStaticFilePath(char **argv);
++bool BuildArguments(int argc, char *argv[], s_arguments *arguments);
++void FreeArguments(s_arguments *arguments);
++
++}
++
++#endif  // SRC_STATIC_ENTRY_POINT_H_
+-- 
+2.10.2
+

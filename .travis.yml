@@ -1,0 +1,73 @@
+language: cpp
+sudo: false
+
+env:
+  - ARCHITECTURE=x64
+  - ARCHITECTURE=x86
+os:
+  - linux
+  - osx
+
+matrix:
+  exclude:
+    - os: osx
+      env: ARCHITECTURE=x86
+
+# C++11 support
+# See https://github.com/PacificBiosciences/pbdagcon/pull/7
+
+compiler:
+  - gcc
+
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - gcc-4.8
+      - g++-4.8
+      - gcc-4.8-multilib
+      - g++-4.8-multilib
+      - linux-libc-dev:i386
+      - clang
+      - dpkg
+      - fakeroot
+
+install:
+  - if [ "$CXX" = "g++" ] && [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
+      export CXX="g++-4.8" CC="gcc-4.8";
+    fi
+  - git config --global user.email "juan@resin.io"
+  - git config --global user.name "Juan Cruz Viotti"
+
+script:
+  - make build-$ARCHITECTURE
+
+notifications:
+  email: false
+
+deploy:
+  - provider: releases
+    api_key: $GITHUB_OAUTH_TOKEN
+    file:
+      - out/node-darwin-x64
+    skip_cleanup: true
+    on:
+      tags: true
+      condition: "$TRAVIS_OS_NAME-$ARCHITECTURE = osx-x64"
+  - provider: releases
+    api_key: $GITHUB_OAUTH_TOKEN
+    file:
+      - out/node-linux-x64
+    skip_cleanup: true
+    on:
+      tags: true
+      condition: "$TRAVIS_OS_NAME-$ARCHITECTURE = linux-x64"
+  - provider: releases
+    api_key: $GITHUB_OAUTH_TOKEN
+    file:
+      - out/node-linux-x86
+    skip_cleanup: true
+    on:
+      tags: true
+      condition: "$TRAVIS_OS_NAME-$ARCHITECTURE = linux-x86"

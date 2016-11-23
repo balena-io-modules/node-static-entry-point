@@ -1,0 +1,60 @@
+# appveyor file
+# http://www.appveyor.com/docs/appveyor-yml
+
+init:
+  - git config --global core.autocrlf input
+
+image: Visual Studio 2015
+
+environment:
+  global:
+    CHOCOLATEY_CACHE: '%AppData%\chocolatey-cache'
+    GITHUB_OAUTH_TOKEN: VeFwDoXDOOUm2/CV2T51qTGX8cmQqsALsCGUpg1d3zLpcN52MYRH+VpCWYpoV7xh
+  matrix:
+    - ARCHITECTURE: x64
+    - ARCHITECTURE: x86
+
+cache:
+  - '%CHOCOLATEY_CACHE%'
+
+install:
+  - git config --global user.email "juan@resin.io"
+  - git config --global user.name "Juan Cruz Viotti"
+  - choco config set cacheLocation %CHOCOLATEY_CACHE%
+  - choco install gnuwin32-make.portable
+
+build: off
+
+test_script:
+  - make build-%ARCHITECTURE%
+
+artifacts:
+  - path: 'out\*'
+
+deploy:
+
+  - provider: GitHub
+    release: $(appveyor_build_version)
+    description: $(appveyor_build_version)
+    auth_token:
+      secure: $(GITHUB_OAUTH_TOKEN)
+    artifact: out\node-win32-x86.exe
+    draft: false
+    prerelease: false
+    on:
+      branch: master
+      appveyor_repo_tag: true
+      ARCHITECTURE: x86
+
+  - provider: GitHub
+    release: $(appveyor_build_version)
+    description: $(appveyor_build_version)
+    auth_token:
+      secure: $(GITHUB_OAUTH_TOKEN)
+    artifact: out\node-win32-x64.exe
+    draft: false
+    prerelease: false
+    on:
+      branch: master
+      appveyor_repo_tag: true
+      ARCHITECTURE: x64
