@@ -42,7 +42,6 @@ deploy:
     draft: false
     prerelease: false
     on:
-      branch: master
       appveyor_repo_tag: true
       ARCHITECTURE: x86
 
@@ -55,6 +54,5 @@ deploy:
     draft: false
     prerelease: false
     on:
-      branch: master
       appveyor_repo_tag: true
       ARCHITECTURE: x64
