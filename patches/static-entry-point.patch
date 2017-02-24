@@ -1,4 +1,4 @@
-From 46bd06e9f1c93ee15b6e9c251801f632431a1b56 Mon Sep 17 00:00:00 2001
+From 30ad757e0b4d83924b5f98b1ee6e6eeda7a5db39 Mon Sep 17 00:00:00 2001
 From: Juan Cruz Viotti <jviotti@openmailbox.org>
 Date: Thu, 10 Nov 2016 13:15:09 +0200
 Subject: [PATCH] main: lock entry point to "index.js" in the current directory
@@ -9,16 +9,16 @@ and pass every arguments to it.
 
 Signed-off-by: Juan Cruz Viotti <jviotti@openmailbox.org>
 ---
- node.gyp                  |  1 +
- src/node_main.cc          | 15 ++++++++--
- src/static-entry-point.cc | 75 +++++++++++++++++++++++++++++++++++++++++++++++
- src/static-entry-point.h  | 38 ++++++++++++++++++++++++
- 4 files changed, 127 insertions(+), 2 deletions(-)
+ node.gyp                  |   1 +
+ src/node_main.cc          |  15 ++++++-
+ src/static-entry-point.cc | 102 ++++++++++++++++++++++++++++++++++++++++++++++
+ src/static-entry-point.h  |  35 ++++++++++++++++
+ 4 files changed, 151 insertions(+), 2 deletions(-)
  create mode 100644 src/static-entry-point.cc
  create mode 100644 src/static-entry-point.h
 
 diff --git a/node.gyp b/node.gyp
-index 0f263d1..631bc70 100644
+index 0f263d13..631bc70d 100644
 --- a/node.gyp
 +++ b/node.gyp
 @@ -166,6 +166,7 @@
@@ -30,7 +30,7 @@ index 0f263d1..631bc70 100644
          'src/stream_base.cc',
          'src/stream_wrap.cc',
 diff --git a/src/node_main.cc b/src/node_main.cc
-index bde3975..cff9024 100644
+index bde39756..cff90248 100644
 --- a/src/node_main.cc
 +++ b/src/node_main.cc
 @@ -1,4 +1,5 @@
@@ -69,22 +69,22 @@ index bde3975..cff9024 100644
  #endif
 diff --git a/src/static-entry-point.cc b/src/static-entry-point.cc
 new file mode 100644
-index 0000000..a4fd834
+index 00000000..bde10800
 --- /dev/null
 +++ b/src/static-entry-point.cc
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,102 @@
 +#include "static-entry-point.h"
 +
 +namespace entry {
 +
-+char *AppendString(char **buffer, const char *string) {
++static char *AppendString(char **buffer, const char *string) {
 +  if (!strcpy(*buffer, string)) return NULL;
 +  char *location = *buffer;
 +  *buffer += strlen(string) + 1;
 +  return location;
 +}
 +
-+size_t GetArgvByteSize(int argc, char *argv[]) {
++static size_t GetArgvByteSize(int argc, char *argv[]) {
 +  size_t size = 0;
 +
 +  for (int index = 0; index < argc; index++) {
@@ -98,14 +98,19 @@ index 0000000..a4fd834
 +  char *file = (char *)calloc(MAXPATHLEN, sizeof(char));
 +  if (file == NULL) return NULL;
 +#ifdef _WIN32
-+  if (!GetFullPathName(argv[0], MAXPATHLEN, file, NULL)) return NULL;
++  if (!GetFullPathName(argv[0], MAXPATHLEN, file, NULL)) goto free_file;
 +  char *delimiter = strrchr(file, '\\');
 +  if (delimiter) delimiter[0] = 0;
 +#else
-+  if (!strcat(file, dirname(argv[0]))) return NULL;
++  if (!strcat(file, dirname(argv[0]))) goto free_file;
 +#endif
-+  if (!strcat(file, STATIC_FILE_NAME)) return NULL;
-+  return file;
++  if (!strcat(file, STATIC_FILE_NAME)) goto free_file;
++
++return file;
++
++free_file:
++  free(file);
++  return NULL;
 +}
 +
 +bool BuildArguments(int argc, char *argv[], s_arguments *arguments) {
@@ -114,20 +119,37 @@ index 0000000..a4fd834
 +
 +  int arguments_size = strlen(file) + 1 + GetArgvByteSize(argc, argv);
 +  arguments->contents = (char *)malloc(arguments_size);
-+  if (arguments->contents == NULL) return false;
++  if (arguments->contents == NULL) {
++    free(file);
++    return false;
++  }
 +
 +  arguments->argv = (char **)malloc(sizeof(char *) * (argc + 1));
-+  if (arguments->argv == NULL) return false;
++  if (arguments->argv == NULL) {
++    free(file);
++    free(arguments->contents);
++    return false;
++  };
 +
 +  arguments->argc = argc + 1;
 +
 +  char *file_pointer = arguments->contents;
 +
 +  arguments->argv[0] = AppendString(&file_pointer, argv[0]);
-+  if (arguments->argv[0] == NULL) return false;
++  if (arguments->argv[0] == NULL) {
++    free(file);
++    free(arguments->contents);
++    free(arguments->argv);
++    return false;
++  };
 +
 +  arguments->argv[1] = AppendString(&file_pointer, file);
-+  if (arguments->argv[1] == NULL) return false;
++  if (arguments->argv[1] == NULL) {
++    free(file);
++    free(arguments->contents);
++    free(arguments->argv);
++    return false;
++  };
 +
 +  // We don't need `file` anymore
 +  free(file);
@@ -135,7 +157,12 @@ index 0000000..a4fd834
 +  if (argc > 1) {
 +    for (int index = 1; index < argc; index ++) {
 +      arguments->argv[index + 1] = AppendString(&file_pointer, argv[index]);
-+      if (arguments->argv[index + 1] == NULL) return false;
++      if (arguments->argv[index + 1] == NULL) {
++        free(file);
++        free(arguments->contents);
++        free(arguments->argv);
++        return false;
++      };
 +    }
 +  }
 +
@@ -150,10 +177,10 @@ index 0000000..a4fd834
 +}  // namespace entry
 diff --git a/src/static-entry-point.h b/src/static-entry-point.h
 new file mode 100644
-index 0000000..dfe650d
+index 00000000..a514693e
 --- /dev/null
 +++ b/src/static-entry-point.h
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,35 @@
 +#ifndef SRC_STATIC_ENTRY_POINT_H_
 +#define SRC_STATIC_ENTRY_POINT_H_
 +
@@ -183,9 +210,6 @@ index 0000000..dfe650d
 +  char *contents;
 +} s_arguments;
 +
-+char *AppendString(char **buffer, const char *string);
-+size_t GetArgvByteSize(int argc, char *argv[]);
-+char *GetStaticFilePath(char **argv);
 +bool BuildArguments(int argc, char *argv[], s_arguments *arguments);
 +void FreeArguments(s_arguments *arguments);
 +
@@ -193,5 +217,5 @@ index 0000000..dfe650d
 +
 +#endif  // SRC_STATIC_ENTRY_POINT_H_
 -- 
-2.8.3
+2.11.0
 
