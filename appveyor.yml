@@ -9,7 +9,7 @@ image: Visual Studio 2015
 environment:
   global:
     CHOCOLATEY_CACHE: '%AppData%\chocolatey-cache'
-    GITHUB_OAUTH_TOKEN: VeFwDoXDOOUm2/CV2T51qTGX8cmQqsALsCGUpg1d3zLpcN52MYRH+VpCWYpoV7xh
+    GITHUB_OAUTH_TOKEN: VIdYR/v5w3cw1lOSvVdVG2pZEZGJv4u+bMMsQ8OMgl+nLq8sD6HMuP6pKihlK5HU
   matrix:
     - ARCHITECTURE: x64
     - ARCHITECTURE: x86
