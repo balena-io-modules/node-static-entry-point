@@ -1,6 +1,7 @@
 Node Static Entry Point
 =======================
 
+**DEPRECATED** See https://github.com/zeit/pkg
 
 | GNU/Linux & macOS | Windows |
 |-------------------|---------|
